@@ -18,3 +18,7 @@ needs/
 # コマンド
 *.ps1
 *.py
+
+
+# data
+*.json
