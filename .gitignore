@@ -1,0 +1,20 @@
+# バックアップファイル
+*.backup
+*.bak
+
+# エディタファイル
+.vscode/
+.idea/
+
+# システムファイル
+.DS_Store
+Thumbs.db
+
+# ドキュメント（必要に応じて）
+needs/
+*.md
+*.txt
+
+# コマンド
+*.ps1
+*.py
