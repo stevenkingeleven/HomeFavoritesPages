@@ -26,6 +26,8 @@ let isSelecting = false;  // 是否正在框选
 let selectionBox = null;  // 选择框元素
 let selectionStart = { x: 0, y: 0 };  // 框选起始位置
 let isCtrlPressed = false;  // Ctrl 键是否按下
+let dropIndicator = null;  // 拖拽位置指示器
+let insertIndex = -1;  // 插入位置索引
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
@@ -626,9 +628,35 @@ function getCurrentItemsRef() {
     return items;
 }
 
-// 获取当前路径下的项目（返回副本，只读）
+// 获取当前路径下的项目(返回副本,只读)
+// クリックカウント順にソートされたアイテムを返す
 function getCurrentItems() {
-    return getCurrentItemsRef();
+    const items = getCurrentItemsRef();
+    
+    // アイテムに元のインデックスを保持
+    const itemsWithOriginalIndex = items.map((item, index) => ({
+        ...item,
+        _originalIndex: index
+    }));
+    
+    // アイテムをコピーしてソート
+    const sortedItems = itemsWithOriginalIndex.sort((a, b) => {
+        // フォルダは常に上に
+        if (a.type === 'folder' && b.type === 'link') return -1;
+        if (a.type === 'link' && b.type === 'folder') return 1;
+        
+        // 両方リンクの場合、クリックカウントでソート(降順)
+        if (a.type === 'link' && b.type === 'link') {
+            const countA = a.clickCount || 0;
+            const countB = b.clickCount || 0;
+            return countB - countA; // 高い順
+        }
+        
+        // フォルダ同士はそのまま
+        return 0;
+    });
+    
+    return sortedItems;
 }
 
 // 搜索所有项目
@@ -701,11 +729,12 @@ function renderItems() {
         `;
     }
     
-    items.forEach((item, index) => {
+    items.forEach((item, displayIndex) => {
+        const originalIndex = item._originalIndex !== undefined ? item._originalIndex : displayIndex;
         if (item.type === 'folder') {
-            html += createFolderHTML(item, index);
+            html += createFolderHTML(item, originalIndex);
         } else if (item.type === 'link') {
-            html += createLinkHTML(item, index);
+            html += createLinkHTML(item, originalIndex);
         }
     });
     
@@ -772,6 +801,8 @@ function createLinkHTML(link, index, isSearchResult = false) {
     const favicon = link.icon || getFaviconUrl(link.url);
     const pathInfo = isSearchResult && link.path ? `<div style="font-size: 11px; color: #999; margin-top: 4px;">${link.path}</div>` : '';
     const selectedClass = selectedIndices.has(index) ? 'selected' : '';
+    const clickCount = link.clickCount || 0;
+    
     return `
         <div class="item ${selectedClass}" 
              draggable="true" 
@@ -786,6 +817,7 @@ function createLinkHTML(link, index, isSearchResult = false) {
                 <button class="item-action-btn edit" onclick="event.stopPropagation(); showEditDialog(${index})" title="编辑">✏️</button>
                 <button class="item-action-btn delete" onclick="event.stopPropagation(); showDeleteDialog(${index})" title="删除">🗑️</button>
             </div>
+            ${clickCount > 0 ? `<div class="click-count" title="クリック回数">${clickCount}</div>` : ''}
             <div class="link-icon">
                 ${favicon ? `<img src="${escapeHtml(favicon)}" alt="${escapeHtml(link.name)}" onerror="this.parentElement.innerHTML='<span class=\\'default-icon\\'>🔗</span>'">` : '<span class="default-icon">🔗</span>'}
             </div>
@@ -804,16 +836,41 @@ function handleItemClick(event, index, type, target) {
         return;
     }
     
-    // 如果有选中的项目，点击非选中项时清除选择
+    // 如果有选中的项目,点击非选中项时清除选择
     if (selectedIndices.size > 0 && !selectedIndices.has(index)) {
         clearSelection();
     }
     
     // 正常点击行为
     if (type === 'folder') {
-        openFolder(target);
+        // 如果在搜索模式下，需要找到该文件夹的完整路径并导航到它
+        if (searchKeyword) {
+            const results = searchAllItems(favoritesData, searchKeyword);
+            const folder = results[index];
+            if (folder && folder.path) {
+                // 清除搜索
+                document.getElementById('searchInput').value = '';
+                searchKeyword = '';
+                document.getElementById('clearSearch').style.display = 'none';
+                
+                // 导航到文件夹路径
+                const pathParts = folder.path.split(' > ').filter(p => p);
+                pathParts.push(folder.name);
+                currentPath = pathParts;
+                renderItems();
+            } else {
+                // 如果没有路径信息，说明是在根目录
+                document.getElementById('searchInput').value = '';
+                searchKeyword = '';
+                document.getElementById('clearSearch').style.display = 'none';
+                currentPath = [folder.name];
+                renderItems();
+            }
+        } else {
+            openFolder(target);
+        }
     } else {
-        openLink(target);
+        openLink(target, index);
     }
 }
 
@@ -838,8 +895,56 @@ function goBack() {
     }
 }
 
-function openLink(url) {
+function openLink(url, index) {
+    console.log('openLink called:', { url, index });
+    
+    // 新しいタブでURLを開く(ポップアップブロッカー対策のため、カウント前に実行)
+    console.log('Opening URL in new tab:', url);
     window.open(url, '_blank');
+    
+    // カウンターを増やす
+    if (index !== undefined) {
+        incrementClickCount(index);
+    }
+}
+
+// クリックカウントを増やす
+function incrementClickCount(index) {
+    console.log('incrementClickCount called with original index:', index);
+    const items = getCurrentItemsRef();
+    
+    // indexは_originalIndexを使って渡されているので、そのまま使える
+    const item = items[index];
+    
+    console.log('Item found:', item);
+    
+    // リンクのみカウント
+    if (item && item.type === 'link') {
+        const oldCount = item.clickCount || 0;
+        item.clickCount = oldCount + 1;
+        console.log('Click count updated:', oldCount, '->', item.clickCount);
+        saveData(); // LocalStorageに保存
+        
+        // 再レンダリングを遅延実行(window.openを妨げないため)
+        setTimeout(() => {
+            renderItems();
+        }, 100);
+    } else {
+        console.warn('Item is not a link or not found:', item);
+    }
+}
+
+// クリックカウント表示を更新
+function updateClickCountDisplay(index, count) {
+    const itemElement = document.querySelector(`[data-index="${index}"] .click-count`);
+    if (itemElement) {
+        itemElement.textContent = count;
+        // アニメーション効果
+        itemElement.classList.add('count-updated');
+        setTimeout(() => {
+            itemElement.classList.remove('count-updated');
+        }, 300);
+    }
 }
 
 function updateBreadcrumb() {
@@ -946,17 +1051,21 @@ function updateTooltipPosition(event) {
 }
 
 function attachEventListeners() {
+    const grid = document.getElementById('itemsGrid');
     const items = document.querySelectorAll('.item');
+    
     items.forEach(item => {
         item.addEventListener('mousemove', updateTooltipPosition);
         
         // 添加拖拽事件监听器
         item.addEventListener('dragstart', handleDragStart);
         item.addEventListener('dragend', handleDragEnd);
-        item.addEventListener('dragover', handleDragOver);
         item.addEventListener('drop', handleDrop);
-        item.addEventListener('dragleave', handleDragLeave);
     });
+    
+    // 为网格添加拖拽事件监听器
+    grid.addEventListener('dragover', handleDragOver);
+    grid.addEventListener('dragleave', handleDragLeave);
     
     // 为返回按钮添加拖拽目标事件
     const backBtn = document.querySelector('.back-btn');
@@ -1090,6 +1199,9 @@ function handleDragStart(e) {
 function handleDragEnd(e) {
     this.classList.remove('dragging');
     
+    // 隐藏插入指示器
+    hideDropIndicator();
+    
     // 移除所有拖拽样式
     document.querySelectorAll('.item').forEach(item => {
         item.classList.remove('drag-over');
@@ -1109,6 +1221,7 @@ function handleDragEnd(e) {
     draggedElement = null;
     draggedIndex = null;
     draggedItem = null;
+    insertIndex = -1;
 }
 
 // 拖拽经过
@@ -1119,17 +1232,160 @@ function handleDragOver(e) {
     
     e.dataTransfer.dropEffect = 'move';
     
-    // 不能拖到自己上
-    if (this !== draggedElement) {
-        this.classList.add('drag-over');
+    // 计算插入位置
+    const grid = document.getElementById('itemsGrid');
+    const items = Array.from(document.querySelectorAll('.item:not(.dragging):not(.dragging-multi)'));
+    
+    // 移除所有高亮
+    items.forEach(item => item.classList.remove('drag-over'));
+    
+    if (items.length === 0) {
+        insertIndex = 0;
+        return false;
+    }
+    
+    // 获取鼠标位置
+    const mouseX = e.clientX;
+    const mouseY = e.clientY;
+    
+    // 查找最近的项目
+    let closestItem = null;
+    let closestDistance = Infinity;
+    let insertBefore = false;
+    
+    items.forEach((item, index) => {
+        const rect = item.getBoundingClientRect();
+        const itemCenterX = rect.left + rect.width / 2;
+        const itemCenterY = rect.top + rect.height / 2;
+        
+        // 计算到项目中心的距离
+        const distance = Math.sqrt(
+            Math.pow(mouseX - itemCenterX, 2) + 
+            Math.pow(mouseY - itemCenterY, 2)
+        );
+        
+        if (distance < closestDistance) {
+            closestDistance = distance;
+            closestItem = item;
+            
+            // 判断是在项目前面还是后面
+            // 如果是在网格布局中，需要考虑水平和垂直位置
+            const isLeft = mouseX < itemCenterX;
+            const isAbove = mouseY < itemCenterY;
+            
+            // 获取网格列数
+            const gridStyle = window.getComputedStyle(grid);
+            const gridCols = gridStyle.gridTemplateColumns.split(' ').length;
+            
+            // 计算当前项目在第几行第几列
+            const itemIndex = parseInt(item.getAttribute('data-index'));
+            const row = Math.floor(itemIndex / gridCols);
+            const col = itemIndex % gridCols;
+            
+            // 如果鼠标在上方，插入到当前项之前
+            // 如果鼠标在左侧且在同一行，插入到当前项之前
+            // 否则插入到当前项之后
+            if (isAbove) {
+                insertBefore = true;
+            } else if (isLeft && Math.floor((itemIndex) / gridCols) === row) {
+                insertBefore = true;
+            } else {
+                insertBefore = false;
+            }
+        }
+    });
+    
+    if (closestItem) {
+        const targetIndex = parseInt(closestItem.getAttribute('data-index'));
+        
+        // 检查是否为文件夹，如果鼠标在文件夹中心附近，则高亮文件夹（表示要移入）
+        const rect = closestItem.getBoundingClientRect();
+        const itemCenterX = rect.left + rect.width / 2;
+        const itemCenterY = rect.top + rect.height / 2;
+        const distanceToCenter = Math.sqrt(
+            Math.pow(mouseX - itemCenterX, 2) + 
+            Math.pow(mouseY - itemCenterY, 2)
+        );
+        
+        const items = getCurrentItemsRef();
+        const targetItem = items[targetIndex];
+        
+        // 如果目标是文件夹且鼠标离中心很近，表示要移入文件夹
+        if (targetItem && targetItem.type === 'folder' && distanceToCenter < 40) {
+            closestItem.classList.add('drag-over');
+            insertIndex = -1; // 表示要移入文件夹
+            showDropIndicator(null); // 隐藏插入指示器
+        } else {
+            // 否则显示插入位置
+            insertIndex = insertBefore ? targetIndex : targetIndex + 1;
+            showDropIndicator(closestItem, insertBefore);
+        }
     }
     
     return false;
 }
 
+// 显示插入位置指示器
+function showDropIndicator(targetElement, insertBefore) {
+    if (!dropIndicator) {
+        dropIndicator = document.createElement('div');
+        dropIndicator.className = 'drop-indicator';
+        document.getElementById('itemsGrid').appendChild(dropIndicator);
+    }
+    
+    if (!targetElement) {
+        dropIndicator.style.display = 'none';
+        return;
+    }
+    
+    const rect = targetElement.getBoundingClientRect();
+    const grid = document.getElementById('itemsGrid');
+    const gridRect = grid.getBoundingClientRect();
+    
+    dropIndicator.style.display = 'block';
+    
+    // 根据网格布局判断是显示垂直线还是水平线
+    const gridStyle = window.getComputedStyle(grid);
+    const gridCols = gridStyle.gridTemplateColumns.split(' ').length;
+    const targetIndex = parseInt(targetElement.getAttribute('data-index'));
+    const col = targetIndex % gridCols;
+    
+    if (insertBefore) {
+        // 在目标项之前插入
+        if (col === 0) {
+            // 第一列，显示垂直线在左侧
+            dropIndicator.style.left = (rect.left - gridRect.left - 2) + 'px';
+            dropIndicator.style.top = (rect.top - gridRect.top) + 'px';
+            dropIndicator.style.width = '4px';
+            dropIndicator.style.height = rect.height + 'px';
+        } else {
+            // 其他列，显示垂直线在左侧
+            dropIndicator.style.left = (rect.left - gridRect.left - 2) + 'px';
+            dropIndicator.style.top = (rect.top - gridRect.top) + 'px';
+            dropIndicator.style.width = '4px';
+            dropIndicator.style.height = rect.height + 'px';
+        }
+    } else {
+        // 在目标项之后插入
+        dropIndicator.style.left = (rect.right - gridRect.left - 2) + 'px';
+        dropIndicator.style.top = (rect.top - gridRect.top) + 'px';
+        dropIndicator.style.width = '4px';
+        dropIndicator.style.height = rect.height + 'px';
+    }
+}
+
+// 隐藏插入位置指示器
+function hideDropIndicator() {
+    if (dropIndicator) {
+        dropIndicator.style.display = 'none';
+    }
+}
+
 // 拖拽离开
 function handleDragLeave(e) {
-    this.classList.remove('drag-over');
+    // 移除高亮
+    const items = document.querySelectorAll('.item');
+    items.forEach(item => item.classList.remove('drag-over'));
 }
 
 // 放置
@@ -1138,36 +1394,67 @@ function handleDrop(e) {
         e.stopPropagation();
     }
     
-    this.classList.remove('drag-over');
+    e.preventDefault();
     
-    // 不能拖到自己上
-    if (this === draggedElement) {
-        return false;
-    }
+    // 隐藏插入指示器
+    hideDropIndicator();
     
-    const dropIndex = parseInt(this.getAttribute('data-index'));
+    // 移除所有高亮
+    document.querySelectorAll('.item').forEach(item => {
+        item.classList.remove('drag-over');
+    });
+    
     const items = getCurrentItemsRef();
-    const targetItem = items[dropIndex];
     
-    // 如果有多选，执行批量移动
-    if (selectedIndices.size > 1) {
-        // 如果目标是文件夹，则移动所有选中项到该文件夹
+    // 如果 insertIndex 为 -1，表示要移入文件夹
+    if (insertIndex === -1) {
+        const dropIndex = parseInt(this.getAttribute('data-index'));
+        const targetItem = items[dropIndex];
+        
         if (targetItem && targetItem.type === 'folder') {
-            moveMultipleItemsToFolder(Array.from(selectedIndices), dropIndex);
+            if (selectedIndices.size > 1) {
+                moveMultipleItemsToFolder(Array.from(selectedIndices), dropIndex);
+            } else if (draggedIndex !== null) {
+                moveItemToFolder(draggedIndex, dropIndex);
+            }
         }
-        // 多选时不支持重排序
     } else {
-        // 单个项目的移动逻辑
-        if (targetItem && targetItem.type === 'folder') {
-            moveItemToFolder(draggedIndex, dropIndex);
-        } else {
-            if (draggedIndex !== null && dropIndex !== null && draggedIndex !== dropIndex) {
-                reorderItems(draggedIndex, dropIndex);
+        // 否则执行重新排序
+        if (selectedIndices.size > 1) {
+            // 多选时不支持重排序，只能移入文件夹
+            showTemporaryMessage('複数選択時は並び替えできません。フォルダに移動してください。');
+        } else if (draggedIndex !== null && insertIndex !== -1) {
+            // 调整插入位置（如果拖动的项在插入位置之前）
+            let adjustedInsertIndex = insertIndex;
+            if (draggedIndex < insertIndex) {
+                adjustedInsertIndex--;
+            }
+            
+            if (draggedIndex !== adjustedInsertIndex) {
+                reorderItems(draggedIndex, adjustedInsertIndex);
             }
         }
     }
     
+    insertIndex = -1;
     return false;
+}
+
+// 返回按钮拖拽经过
+function handleBackBtnDragOver(e) {
+    if (e.preventDefault) {
+        e.preventDefault();
+    }
+    
+    e.dataTransfer.dropEffect = 'move';
+    this.classList.add('drag-over');
+    
+    return false;
+}
+
+// 返回按钮拖拽离开
+function handleBackBtnDragLeave(e) {
+    this.classList.remove('drag-over');
 }
 
 // 返回按钮放置

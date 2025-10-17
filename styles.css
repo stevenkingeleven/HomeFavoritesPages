@@ -364,12 +364,25 @@ main {
     display: flex;
     flex-direction: column;
     align-items: center;
-    cursor: pointer;
+    cursor: grab;
     padding: 20px;
     border-radius: 16px;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     user-select: none;
+    -webkit-user-drag: element;
+    touch-action: none;
+}
+
+.item:hover {
+    background: rgba(102, 126, 234, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.item:active {
+    cursor: grabbing;
+    transform: scale(0.98);
 }
 
 .item.selected {
@@ -384,33 +397,55 @@ main {
 }
 
 .item.dragging {
-    opacity: 0.3;
-    cursor: move;
+    opacity: 0.5;
+    cursor: grabbing;
+    transform: scale(1.05) rotate(3deg);
+    transition: all 0.2s ease;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
 }
 
 .item.dragging-multi {
-    opacity: 0.4;
-    transform: scale(0.95);
+    opacity: 0.6;
+    transform: scale(0.95) rotate(-2deg);
+    transition: all 0.2s ease;
 }
 
 .item.drag-over {
-    background: rgba(102, 126, 234, 0.2);
-    transform: scale(0.95);
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
+    background: rgba(102, 126, 234, 0.15);
+    transform: scale(1.05);
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.4), 0 8px 20px rgba(102, 126, 234, 0.3);
+    transition: all 0.2s ease;
 }
 
 .item.drag-over.item:has(.folder-icon) {
-    background: rgba(102, 126, 234, 0.3);
+    background: rgba(102, 126, 234, 0.25);
+    animation: pulse 0.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1.05);
+    }
+    50% {
+        transform: scale(1.08);
+    }
 }
 
 .item.drag-over .folder-icon {
-    transform: scale(1.2);
+    transform: scale(1.15);
     filter: brightness(1.2);
+    transition: all 0.2s ease;
 }
 
-.item.drag-over .folder-icon {
-    transform: scale(1.2);
-    filter: brightness(1.2);
+.item {
+    cursor: grab;
+    user-select: none;
+    -webkit-user-drag: element;
+}
+
+.item:active {
+    cursor: grabbing;
 }
 
 /* 选择框样式 */
@@ -475,15 +510,21 @@ main {
     font-size: 18px;
     font-weight: bold;
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+    animation: dragBadgePulse 0.3s ease-in-out;
 }
 
-.item:hover {
-    background: rgba(102, 126, 234, 0.1);
-    transform: translateY(-5px);
-}
-
-.item:active {
-    transform: translateY(-2px);
+@keyframes dragBadgePulse {
+    0% {
+        transform: scale(0);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
 }
 
 .folder-icon {
@@ -574,6 +615,41 @@ main {
 
 .item:hover .item-actions {
     display: flex;
+}
+
+/* クリックカウント表示 */
+.click-count {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 3px 8px;
+    border-radius: 12px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    z-index: 9;
+    min-width: 20px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.click-count.count-updated {
+    animation: countPulse 0.3s ease;
+}
+
+@keyframes countPulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.3);
+        background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
+    }
+    100% {
+        transform: scale(1);
+    }
 }
 
 .item-action-btn {
@@ -1034,6 +1110,30 @@ main {
 
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(102, 126, 234, 0.7);
+}
+
+/* ドロップ位置インジケーター */
+.drop-indicator {
+    position: absolute;
+    width: 4px;
+    background: linear-gradient(180deg, transparent, #667eea, #667eea, transparent);
+    border-radius: 2px;
+    pointer-events: none;
+    z-index: 1000;
+    animation: dropIndicatorPulse 1s ease-in-out infinite;
+    box-shadow: 0 0 10px rgba(102, 126, 234, 0.8),
+                0 0 20px rgba(102, 126, 234, 0.4);
+}
+
+@keyframes dropIndicatorPulse {
+    0%, 100% {
+        opacity: 0.7;
+        transform: scaleY(0.98);
+    }
+    50% {
+        opacity: 1;
+        transform: scaleY(1);
+    }
 }
 
 /* 拖拽提示消息动画 */

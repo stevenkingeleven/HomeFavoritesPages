@@ -76,9 +76,12 @@
     
     <script type="text/javascript" src="./script.js"></script>
     <script>
-        // iOS Edge互換性チェック
-        if (typeof window.favoritesData === 'undefined') {
+        // スクリプト読み込み確認
+        if (typeof defaultFavoritesData === 'undefined') {
             console.error('Script failed to load. Please check file paths.');
+            alert('エラー: スクリプトファイルが読み込めませんでした。\nファイルパスを確認してください。');
+        } else {
+            console.log('✅ Script loaded successfully');
         }
     </script>
 </body>
