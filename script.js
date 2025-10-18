@@ -756,11 +756,10 @@ function renderItems() {
     }
     
     items.forEach((item, displayIndex) => {
-        const originalIndex = item._originalIndex !== undefined ? item._originalIndex : displayIndex;
         if (item.type === 'folder') {
-            html += createFolderHTML(item, originalIndex);
+            html += createFolderHTML(item, displayIndex);
         } else if (item.type === 'link') {
-            html += createLinkHTML(item, originalIndex);
+            html += createLinkHTML(item, displayIndex);
         }
     });
     
@@ -801,7 +800,8 @@ function renderSearchResults(grid) {
 // 创建文件夹 HTML
 function createFolderHTML(folder, index, isSearchResult = false) {
     const pathInfo = isSearchResult && folder.path ? `<div style="font-size: 11px; color: #999; margin-top: 4px;">${folder.path}</div>` : '';
-    const selectedClass = selectedIndices.has(index) ? 'selected' : '';
+    const originalIndex = folder._originalIndex !== undefined ? folder._originalIndex : index;
+    const selectedClass = selectedIndices.has(originalIndex) ? 'selected' : '';
     const hasTooltip = folder.description ? true : false;
     const tooltipHTML = hasTooltip ? `
         <div class="item-tooltip">
@@ -809,16 +809,26 @@ function createFolderHTML(folder, index, isSearchResult = false) {
         </div>
     ` : '';
     
+    console.log('Creating folder HTML:', { 
+        name: folder.name, 
+        displayIndex: index, 
+        originalIndex: originalIndex,
+        hasOriginalIndex: folder._originalIndex !== undefined 
+    });
+    
     return `
         <div class="item ${selectedClass}" 
              draggable="true" 
-             data-index="${index}">
+             data-index="${index}"
+             data-original-index="${originalIndex}"
+             data-item-name="${escapeHtml(folder.name)}"
+             data-item-type="folder">
             <div class="selection-checkbox ${selectedClass ? 'visible' : ''}">
                 <span class="checkbox-icon">✓</span>
             </div>
             <div class="item-actions">
-                <button class="item-action-btn edit" onclick="event.stopPropagation(); showEditDialog(${index})" title="编辑">✏️</button>
-                <button class="item-action-btn delete" onclick="event.stopPropagation(); showDeleteDialog(${index})" title="删除">🗑️</button>
+                <button class="item-action-btn edit" onclick="event.stopPropagation(); showEditDialog(${originalIndex})" title="编辑">✏️</button>
+                <button class="item-action-btn delete" onclick="event.stopPropagation(); showDeleteDialog(${originalIndex})" title="删除">🗑️</button>
             </div>
             <div class="folder-icon">📁</div>
             <div class="item-name">${escapeHtml(folder.name)}${pathInfo}</div>
@@ -831,8 +841,18 @@ function createFolderHTML(folder, index, isSearchResult = false) {
 function createLinkHTML(link, index, isSearchResult = false) {
     const favicon = link.icon || getFaviconUrl(link.url);
     const pathInfo = isSearchResult && link.path ? `<div style="font-size: 11px; color: #999; margin-top: 4px;">${link.path}</div>` : '';
-    const selectedClass = selectedIndices.has(index) ? 'selected' : '';
+    const originalIndex = link._originalIndex !== undefined ? link._originalIndex : index;
+    const selectedClass = selectedIndices.has(originalIndex) ? 'selected' : '';
     const clickCount = link.clickCount || 0;
+    
+    console.log('Creating link HTML:', { 
+        name: link.name, 
+        url: link.url,
+        displayIndex: index, 
+        originalIndex: originalIndex,
+        hasOriginalIndex: link._originalIndex !== undefined,
+        clickCount: clickCount
+    });
     
     // 构建tooltip内容
     let tooltipHTML = '';
@@ -850,13 +870,17 @@ function createLinkHTML(link, index, isSearchResult = false) {
     return `
         <div class="item ${selectedClass}" 
              draggable="true" 
-             data-index="${index}">
+             data-index="${index}"
+             data-original-index="${originalIndex}"
+             data-item-name="${escapeHtml(link.name)}"
+             data-item-type="link"
+             data-item-url="${escapeHtml(link.url)}">
             <div class="selection-checkbox ${selectedClass ? 'visible' : ''}">
                 <span class="checkbox-icon">✓</span>
             </div>
             <div class="item-actions">
-                <button class="item-action-btn edit" onclick="event.stopPropagation(); showEditDialog(${index})" title="编辑">✏️</button>
-                <button class="item-action-btn delete" onclick="event.stopPropagation(); showDeleteDialog(${index})" title="删除">🗑️</button>
+                <button class="item-action-btn edit" onclick="event.stopPropagation(); showEditDialog(${originalIndex})" title="编辑">✏️</button>
+                <button class="item-action-btn delete" onclick="event.stopPropagation(); showDeleteDialog(${originalIndex})" title="删除">🗑️</button>
             </div>
             ${clickCount > 0 ? `<div class="click-count" title="クリック回数">${clickCount}</div>` : ''}
             <div class="link-icon">
@@ -869,21 +893,24 @@ function createLinkHTML(link, index, isSearchResult = false) {
 }
 
 // 处理项目点击
-function handleItemClick(event, index, type, target) {
+function handleItemClick(event, displayIndex, type, target) {
     // 如果点击的是item本身（不是子元素），才处理
     const clickedItem = event.target.closest('.item');
     if (!clickedItem) return;
+    
+    // 获取原始索引
+    const originalIndex = parseInt(clickedItem.getAttribute('data-original-index') || displayIndex);
     
     // 如果按住 Ctrl/Cmd，切换选择状态
     if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
         event.stopPropagation();
-        toggleItemSelection(index, event);
+        toggleItemSelection(originalIndex, event);
         return;
     }
     
     // 如果有选中的项目,点击非选中项时清除选择
-    if (selectedIndices.size > 0 && !selectedIndices.has(index)) {
+    if (selectedIndices.size > 0 && !selectedIndices.has(originalIndex)) {
         clearSelection();
     }
     
@@ -892,7 +919,7 @@ function handleItemClick(event, index, type, target) {
         // 如果在搜索模式下，需要找到该文件夹的完整路径并导航到它
         if (searchKeyword) {
             const results = searchAllItems(favoritesData, searchKeyword);
-            const folder = results[index];
+            const folder = results[displayIndex];
             if (folder && folder.path) {
                 // 清除搜索
                 document.getElementById('searchInput').value = '';
@@ -916,7 +943,8 @@ function handleItemClick(event, index, type, target) {
             openFolder(target);
         }
     } else {
-        openLink(target, index);
+        // 对于链接，传递原始索引
+        openLink(target, originalIndex);
     }
 }
 
@@ -982,7 +1010,7 @@ function incrementClickCount(index) {
 
 // クリックカウント表示を更新
 function updateClickCountDisplay(index, count) {
-    const itemElement = document.querySelector(`[data-index="${index}"] .click-count`);
+    const itemElement = document.querySelector(`[data-original-index="${index}"] .click-count`);
     if (itemElement) {
         itemElement.textContent = count;
         // アニメーション効果
@@ -1068,28 +1096,43 @@ function attachEventListeners() {
     const grid = document.getElementById('itemsGrid');
     const items = document.querySelectorAll('.item');
     
-    items.forEach(item => {
-        const index = parseInt(item.getAttribute('data-index'));
+    items.forEach((itemElement, index) => {
+        const displayIndex = parseInt(itemElement.getAttribute('data-index'));
+        const originalIndex = parseInt(itemElement.getAttribute('data-original-index'));
+        const itemType = itemElement.getAttribute('data-item-type');
+        const itemName = itemElement.getAttribute('data-item-name');
+        const itemUrl = itemElement.getAttribute('data-item-url');
         
-        // 添加点击事件监听器
-        item.addEventListener('click', (e) => {
-            // 获取项目数据
-            const currentItems = searchKeyword ? searchAllItems(favoritesData, searchKeyword) : getCurrentItems();
-            const itemData = currentItems[index];
+        console.log('Attaching event listener:', {
+            index,
+            displayIndex,
+            originalIndex,
+            itemType,
+            itemName,
+            itemUrl
+        });
+        
+        // 添加点击事件监听器 - 直接使用 DOM 属性中的数据
+        itemElement.addEventListener('click', (e) => {
+            console.log('Item clicked - from DOM attributes:', {
+                displayIndex,
+                originalIndex,
+                itemType,
+                itemName,
+                itemUrl
+            });
             
-            if (itemData) {
-                if (itemData.type === 'folder') {
-                    handleItemClick(e, index, 'folder', itemData.name);
-                } else if (itemData.type === 'link') {
-                    handleItemClick(e, index, 'link', itemData.url);
-                }
+            if (itemType === 'folder') {
+                handleItemClick(e, displayIndex, 'folder', itemName);
+            } else if (itemType === 'link') {
+                handleItemClick(e, displayIndex, 'link', itemUrl);
             }
         });
         
         // 添加拖拽事件监听器
-        item.addEventListener('dragstart', handleDragStart);
-        item.addEventListener('dragend', handleDragEnd);
-        item.addEventListener('drop', handleDrop);
+        itemElement.addEventListener('dragstart', handleDragStart);
+        itemElement.addEventListener('dragend', handleDragEnd);
+        itemElement.addEventListener('drop', handleDrop);
     });
     
     // 为网格添加拖拽事件监听器
@@ -1170,7 +1213,8 @@ function handleDragStart(e) {
     }
     
     draggedElement = this;
-    draggedIndex = parseInt(this.getAttribute('data-index'));
+    const displayIndex = parseInt(this.getAttribute('data-index'));
+    draggedIndex = parseInt(this.getAttribute('data-original-index') || displayIndex);
     
     // 如果拖动的项目未选中，且有其他选中项，清除选择并只拖动当前项
     if (!selectedIndices.has(draggedIndex) && selectedIndices.size > 0) {
@@ -1325,7 +1369,8 @@ function handleDragOver(e) {
     });
     
     if (closestItem) {
-        const targetIndex = parseInt(closestItem.getAttribute('data-index'));
+        const displayTargetIndex = parseInt(closestItem.getAttribute('data-index'));
+        const targetIndex = parseInt(closestItem.getAttribute('data-original-index') || displayTargetIndex);
         
         // 检查是否为文件夹，如果鼠标在文件夹中心附近，则高亮文件夹（表示要移入）
         const rect = closestItem.getBoundingClientRect();
@@ -1437,7 +1482,8 @@ function handleDrop(e) {
     
     // 如果 insertIndex 为 -1，表示要移入文件夹
     if (insertIndex === -1) {
-        const dropIndex = parseInt(this.getAttribute('data-index'));
+        const displayDropIndex = parseInt(this.getAttribute('data-index'));
+        const dropIndex = parseInt(this.getAttribute('data-original-index') || displayDropIndex);
         const targetItem = items[dropIndex];
         
         if (targetItem && targetItem.type === 'folder') {
