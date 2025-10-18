@@ -28,6 +28,7 @@ let selectionStart = { x: 0, y: 0 };  // 框选起始位置
 let isCtrlPressed = false;  // Ctrl 键是否按下
 let dropIndicator = null;  // 拖拽位置指示器
 let insertIndex = -1;  // 插入位置索引
+let currentTooltipElement = null;  // 当前显示tooltip的元素
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
@@ -39,6 +40,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initMultiSelection();
     renderItems();
 });
+
+// 不再需要滚动监听器，因为tooltip现在使用CSS position: absolute
+// 它会自动跟随父元素
 
 // 从 LocalStorage 加载数据
 function loadData() {
@@ -53,6 +57,22 @@ function loadData() {
     } else {
         favoritesData = JSON.parse(JSON.stringify(defaultFavoritesData));
     }
+    // 确保所有链接都有 clickCount 字段（兼容旧数据或默认数据）
+    ensureClickCounts(favoritesData);
+}
+
+// 确保 items 中的每个 link 都包含 clickCount 字段（递归）
+function ensureClickCounts(items) {
+    if (!items || !Array.isArray(items)) return;
+    items.forEach(item => {
+        if (item.type === 'link') {
+            if (typeof item.clickCount !== 'number') {
+                item.clickCount = 0;
+            }
+        } else if (item.type === 'folder' && item.children) {
+            ensureClickCounts(item.children);
+        }
+    });
 }
 
 // 保存数据到 LocalStorage
@@ -428,6 +448,8 @@ function addItem() {
         }
         
         newItem.url = url;
+        // 新增链接时初始化 clickCount
+        newItem.clickCount = 0;
         if (icon) newItem.icon = icon;
     } else {
         newItem.children = [];
@@ -577,6 +599,8 @@ function closeModal() {
 
 // 导出数据
 function exportData() {
+    // 确保导出前所有链接都有 clickCount 字段
+    ensureClickCounts(favoritesData);
     const dataStr = JSON.stringify(favoritesData, null, 2);
     const dataBlob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(dataBlob);
@@ -597,7 +621,9 @@ function importData(event) {
         try {
             const data = JSON.parse(e.target.result);
             if (Array.isArray(data)) {
+                // 将导入的数据加载到内存，并确保 clickCount 字段存在
                 favoritesData = data;
+                ensureClickCounts(favoritesData);
                 saveData();
                 currentPath = [];
                 searchKeyword = '';
@@ -776,13 +802,17 @@ function renderSearchResults(grid) {
 function createFolderHTML(folder, index, isSearchResult = false) {
     const pathInfo = isSearchResult && folder.path ? `<div style="font-size: 11px; color: #999; margin-top: 4px;">${folder.path}</div>` : '';
     const selectedClass = selectedIndices.has(index) ? 'selected' : '';
+    const hasTooltip = folder.description ? true : false;
+    const tooltipHTML = hasTooltip ? `
+        <div class="item-tooltip">
+            <div class="tooltip-description">${escapeHtml(folder.description)}</div>
+        </div>
+    ` : '';
+    
     return `
         <div class="item ${selectedClass}" 
              draggable="true" 
-             data-index="${index}"
-             onclick="handleItemClick(event, ${index}, 'folder', '${escapeHtml(folder.name)}')" 
-             onmouseenter="showTooltip(event, ${index})" 
-             onmouseleave="hideTooltip()">
+             data-index="${index}">
             <div class="selection-checkbox ${selectedClass ? 'visible' : ''}">
                 <span class="checkbox-icon">✓</span>
             </div>
@@ -792,6 +822,7 @@ function createFolderHTML(folder, index, isSearchResult = false) {
             </div>
             <div class="folder-icon">📁</div>
             <div class="item-name">${escapeHtml(folder.name)}${pathInfo}</div>
+            ${tooltipHTML}
         </div>
     `;
 }
@@ -803,13 +834,23 @@ function createLinkHTML(link, index, isSearchResult = false) {
     const selectedClass = selectedIndices.has(index) ? 'selected' : '';
     const clickCount = link.clickCount || 0;
     
+    // 构建tooltip内容
+    let tooltipHTML = '';
+    if (link.description || link.url) {
+        let tooltipContent = '';
+        if (link.description) {
+            tooltipContent += `<div class="tooltip-description">${escapeHtml(link.description)}</div>`;
+        }
+        if (link.url) {
+            tooltipContent += `<div class="tooltip-url">${escapeHtml(decodeURIComponent(link.url))}</div>`;
+        }
+        tooltipHTML = `<div class="item-tooltip">${tooltipContent}</div>`;
+    }
+    
     return `
         <div class="item ${selectedClass}" 
              draggable="true" 
-             data-index="${index}"
-             onclick="handleItemClick(event, ${index}, 'link', '${escapeHtml(link.url)}')" 
-             onmouseenter="showTooltipAndUrl(event, ${index}, '${escapeHtml(link.url)}')" 
-             onmouseleave="hideTooltipAndUrl()">
+             data-index="${index}">
             <div class="selection-checkbox ${selectedClass ? 'visible' : ''}">
                 <span class="checkbox-icon">✓</span>
             </div>
@@ -822,12 +863,17 @@ function createLinkHTML(link, index, isSearchResult = false) {
                 ${favicon ? `<img src="${escapeHtml(favicon)}" alt="${escapeHtml(link.name)}" onerror="this.parentElement.innerHTML='<span class=\\'default-icon\\'>🔗</span>'">` : '<span class="default-icon">🔗</span>'}
             </div>
             <div class="item-name">${escapeHtml(link.name)}${pathInfo}</div>
+            ${tooltipHTML}
         </div>
     `;
 }
 
 // 处理项目点击
 function handleItemClick(event, index, type, target) {
+    // 如果点击的是item本身（不是子元素），才处理
+    const clickedItem = event.target.closest('.item');
+    if (!clickedItem) return;
+    
     // 如果按住 Ctrl/Cmd，切换选择状态
     if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
@@ -979,75 +1025,43 @@ function navigateToPath(index) {
     renderItems();
 }
 
+// 这些函数现在不再需要，因为tooltip通过CSS自动显示
 function showTooltipAndUrl(event, index, url) {
-    let item;
-    if (searchKeyword) {
-        const results = searchAllItems(favoritesData, searchKeyword);
-        item = results[index];
-    } else {
-        const items = getCurrentItems();
-        item = items[index];
-    }
-    
-    if (item && item.description) {
-        const tooltipContent = tooltip.querySelector('.tooltip-content');
-        tooltipContent.textContent = item.description;
-        tooltip.classList.add('show');
-        updateTooltipPosition(event);
-    }
-    
-    if (item && item.type === 'link' && url) {
-        showUrlPreview(url);
-    }
+    // Tooltip现在通过CSS :hover自动显示
 }
 
 function hideTooltipAndUrl() {
-    hideTooltip();
-    hideUrlPreview();
+    // Tooltip现在通过CSS自动隐藏
 }
 
-function showUrlPreview(url) {
-    const urlText = urlPreview.querySelector('.url-text');
-    urlText.textContent = decodeURIComponent(url);
-    urlPreview.classList.add('show');
+function showUrlPreview(url, event) {
+    // 此函数保留以防兼容性，但不再使用
 }
 
 function hideUrlPreview() {
-    urlPreview.classList.remove('show');
+    // 此函数保留以防兼容性，但不再使用
 }
 
+function updateUrlPreviewPosition(event) {
+    // 此函数保留以防兼容性，但不再使用
+}
+
+// 这些函数现在不再需要，因为tooltip通过CSS自动显示
+// 保留空函数以防向后兼容
 function showTooltip(event, index) {
-    let item;
-    if (searchKeyword) {
-        const results = searchAllItems(favoritesData, searchKeyword);
-        item = results[index];
-    } else {
-        const items = getCurrentItems();
-        item = items[index];
-    }
-    
-    if (!item || !item.description) {
-        return;
-    }
-    
-    const tooltipContent = tooltip.querySelector('.tooltip-content');
-    tooltipContent.textContent = item.description;
-    
-    tooltip.classList.add('show');
-    updateTooltipPosition(event);
+    // Tooltip现在通过CSS :hover自动显示
 }
 
 function hideTooltip() {
-    tooltip.classList.remove('show');
+    // Tooltip现在通过CSS自动隐藏
 }
 
 function updateTooltipPosition(event) {
-    const x = event.clientX;
-    const y = event.clientY;
-    const offset = 15;
-    
-    tooltip.style.left = (x + offset) + 'px';
-    tooltip.style.top = (y + offset) + 'px';
+    // 不再需要
+}
+
+function updateTooltipPositionByElement(element) {
+    // 不再需要
 }
 
 function attachEventListeners() {
@@ -1055,7 +1069,22 @@ function attachEventListeners() {
     const items = document.querySelectorAll('.item');
     
     items.forEach(item => {
-        item.addEventListener('mousemove', updateTooltipPosition);
+        const index = parseInt(item.getAttribute('data-index'));
+        
+        // 添加点击事件监听器
+        item.addEventListener('click', (e) => {
+            // 获取项目数据
+            const currentItems = searchKeyword ? searchAllItems(favoritesData, searchKeyword) : getCurrentItems();
+            const itemData = currentItems[index];
+            
+            if (itemData) {
+                if (itemData.type === 'folder') {
+                    handleItemClick(e, index, 'folder', itemData.name);
+                } else if (itemData.type === 'link') {
+                    handleItemClick(e, index, 'link', itemData.url);
+                }
+            }
+        });
         
         // 添加拖拽事件监听器
         item.addEventListener('dragstart', handleDragStart);
